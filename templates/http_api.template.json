@@ -1,0 +1,73 @@
+{
+  "name": "example-http-api",
+  "contract_type": "http_api",
+  "commands": {
+    "install": "python3 -m pip install -r requirements.txt",
+    "start": "PORT=8080 python3 app.py > /tmp/example-http-api.log 2>&1",
+    "stop": "kill <pid>",
+    "health": "curl -fsS http://127.0.0.1:8080/health",
+    "smoke": "curl -sS -X POST http://127.0.0.1:8080/route -H 'Content-Type: application/json' -d '{\"query\":\"hello\"}'"
+  },
+  "artifacts": [
+    "app.py",
+    "README.md"
+  ],
+  "deps": ["python3", "curl", "ss"],
+  "packaging": [
+    "requirements.txt",
+    "Dockerfile"
+  ],
+  "health": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8080/health",
+    "expect_status": 200,
+    "contains": ["ok"]
+  },
+  "smoke": [
+    {
+      "name": "primary_happy_path",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/route",
+      "json": {"query": "hello"},
+      "expect_status": 200,
+      "contains": ["route"]
+    }
+  ],
+  "failures": [
+    {
+      "name": "missing_query_returns_400",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/route",
+      "json": {},
+      "expect_status": 400,
+      "contains": ["error"]
+    }
+  ],
+  "integration": {
+    "description": "Replace with the real downstream or interface proof required for promotion.",
+    "cases": [
+      {
+        "name": "routes_catalog_exposed",
+        "method": "GET",
+        "url": "http://127.0.0.1:8080/routes",
+        "expect_status": 200
+      }
+    ]
+  },
+  "logs": {
+    "path": "/tmp/example-http-api.log",
+    "contains": ["latency", "error", "request"]
+  },
+  "guards": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "verdict": {
+    "claim": "HTTP API readiness is evidenced on loopback",
+    "reason": "Replace this sentence with the concrete one-line verdict for the service under test.",
+    "next": "Publish or rerun after missing evidence is added"
+  },
+  "notes": [
+    "Template only: replace placeholder endpoints, packaging and verdict before use."
+  ]
+}

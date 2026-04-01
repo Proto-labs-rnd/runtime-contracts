@@ -1,0 +1,62 @@
+{
+  "name": "example-mcp-server",
+  "contract_type": "mcp_server",
+  "commands": {
+    "install": "python3 -m pip install -r requirements.txt",
+    "start": "python3 tools/my_mcp_server.py > /tmp/example-mcp.log 2>&1",
+    "stop": "kill <pid>",
+    "health": "python3 scripts/check_mcp_initialize.py",
+    "test": "python3 scripts/check_mcp_tool.py"
+  },
+  "artifacts": [
+    "tools/my_mcp_server.py",
+    "scripts/check_mcp_initialize.py",
+    "scripts/check_mcp_tool.py"
+  ],
+  "deps": ["python3"],
+  "packaging": [
+    "requirements.txt"
+  ],
+  "mcp": {
+    "transport": "stdio",
+    "command": "python3",
+    "args": ["tools/my_mcp_server.py"],
+    "cwd": "/absolute/path/to/workspace",
+    "stderr_log": "/tmp/example-mcp.log",
+    "timeout_seconds": 10,
+    "safe_tool": {
+      "name": "list_items",
+      "arguments": {}
+    },
+    "integration_tool": {
+      "name": "get_status",
+      "arguments": {},
+      "contains": ["ok"]
+    },
+    "failure_tool": {
+      "name": "get_item",
+      "arguments": {},
+      "expect_error": true,
+      "contains": ["Field required"]
+    }
+  },
+  "logs": {
+    "path": "/tmp/example-mcp.log",
+    "contains": ["ListToolsRequest", "CallToolRequest"]
+  },
+  "guards": {
+    "transport": "stdio"
+  },
+  "integration": {
+    "description": "Use a real initialize + tool invocation proof against the target transport (stdio/SSE/HTTP).",
+    "cases": []
+  },
+  "verdict": {
+    "claim": "MCP server evidence is captured",
+    "reason": "Fill with the observed initialize/tool result and transport used.",
+    "next": "Add transport-specific proof and rerun"
+  },
+  "notes": [
+    "The validator now supports native MCP stdio probes: initialize, tools/list, safe tools/call, optional integration and failure tool calls."
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "mcp-server-http-template",
+  "contract_type": "mcp_server",
+  "artifacts": [
+    "tools/runtime-contract-check.py",
+    "path/to/your/mcp-server.py"
+  ],
+  "deps": {
+    "pip": ["mcp", "httpx"],
+    "note": "MCP HTTP/SSE server dependencies"
+  },
+  "packaging": [
+    "requirements.txt",
+    "Dockerfile"
+  ],
+  "mcp": {
+    "transport": "sse",
+    "url": "https://your-server.example.com/mcp/sse",
+    "headers": {
+      "Authorization": "Bearer YOUR_TOKEN_HERE"
+    },
+    "timeout_seconds": 15,
+    "read_timeout_seconds": 300,
+    "safe_tool_keywords": ["list", "get", "search", "read"],
+    "integration_tool": {
+      "name": "your_integration_tool",
+      "args": {"param": "value"}
+    },
+    "failure_tool": {
+      "name": "nonexistent_tool_for_testing",
+      "args": {}
+    }
+  },
+  "logs": {
+    "paths": ["/var/log/mcp-server.log"],
+    "contains": ["request", "error", "tool_call"]
+  },
+  "guards": {
+    "transport": "sse",
+    "note": "SSE transport over HTTPS with Bearer auth. No local port binding."
+  },
+  "commands": {
+    "start": "python3 -m your_mcp_server --transport sse --port 8080",
+    "stop": "pkill -f your_mcp_server",
+    "health": "curl -s http://localhost:8080/health",
+    "smoke": "curl -s http://localhost:8080/mcp/sse"
+  },
+  "verdict": {
+    "claim": "MCP server is reachable and responds to protocol handshake",
+    "reason": "Runtime contract validates initialize, tools/list, and safe tool call",
+    "next": "Integrate into CI pipeline"
+  }
+}

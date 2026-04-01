@@ -1,0 +1,40 @@
+{
+  "name": "example-worker",
+  "contract_type": "worker",
+  "commands": {
+    "install": "python3 -m pip install -r requirements.txt",
+    "start": "python3 worker.py > /tmp/example-worker.log 2>&1",
+    "stop": "kill <pid>",
+    "health": "tail -n 5 /tmp/example-worker.heartbeat",
+    "test": "python3 scripts/enqueue_test_job.py"
+  },
+  "artifacts": [
+    "worker.py",
+    "scripts/enqueue_test_job.py"
+  ],
+  "deps": ["python3"],
+  "packaging": [
+    "requirements.txt",
+    "Dockerfile"
+  ],
+  "logs": {
+    "path": "/tmp/example-worker.log",
+    "contains": ["job_id", "status", "latency_ms"]
+  },
+  "failures": {
+    "description": "Worker validation usually needs custom scripts or queue fixtures; fill with real proof paths.",
+    "cases": []
+  },
+  "integration": {
+    "description": "Document the exact queue/topic/db dependency proven by this run.",
+    "cases": []
+  },
+  "verdict": {
+    "claim": "Worker runtime evidence is captured",
+    "reason": "Fill with a one-line verdict tied to the observed queue/job path.",
+    "next": "Add queue-specific smoke/failure evidence"
+  },
+  "notes": [
+    "The current validator executes HTTP probes; for workers, pair this template with scripted evidence and logs until worker-native probes exist."
+  ]
+}

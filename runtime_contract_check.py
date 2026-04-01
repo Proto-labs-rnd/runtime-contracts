@@ -30,8 +30,11 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import httpx
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 
 
 PROFILE_RULES: dict[str, dict[str, Any]] = {
@@ -256,14 +259,19 @@ def check_logs(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_guard(spec: dict[str, Any]) -> dict[str, Any]:
-    if spec.get("transport") == "stdio":
+    if spec.get("transport") in ("stdio", "sse", "streamable_http"):
         return {
             "ok": True,
-            "transport": "stdio",
-            "note": spec.get("note", "stdio transport remains local to the spawned process"),
+            "transport": spec.get("transport", "stdio"),
+            "note": spec.get("note", f"{spec.get('transport', 'stdio')} transport — no local port binding required"),
         }
     host = spec.get("host", "127.0.0.1")
-    port = int(spec["port"])
+    port = int(spec.get("port", 0))
+    if not port:
+        return {
+            "ok": False,
+            "error": "Missing 'port' for guard check on network transport",
+        }
     cmd = ["ss", "-ltn", f"( sport = :{port} )"]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     stdout = proc.stdout.strip()
@@ -437,27 +445,154 @@ async def run_mcp_stdio_probe_async(spec: dict[str, Any]) -> dict[str, Any]:
             errlog.close()
 
 
-def run_mcp_probe(spec: dict[str, Any]) -> dict[str, Any]:
-    if spec.get("transport", "stdio") != "stdio":
+async def run_mcp_http_probe_async(spec: dict[str, Any]) -> dict[str, Any]:
+    """MCP probe for HTTP/SSE transport — connects to a remote MCP server."""
+    transport = spec.get("transport", "sse")
+    url = spec.get("url")
+    headers = spec.get("headers", {})
+    timeout_seconds = int(spec.get("timeout_seconds", 10))
+    read_timeout = int(spec.get("read_timeout_seconds", 300))
+
+    if not url:
         return {
             "ok": False,
-            "error": f"Unsupported MCP transport: {spec.get('transport')}",
-            "health": {"ok": False, "error": f"Unsupported MCP transport: {spec.get('transport')}", "body_preview": ""},
+            "error": "Missing 'url' for HTTP/SSE transport",
+            "health": {"ok": False, "error": "Missing 'url'", "body_preview": ""},
             "smoke": {"ok": False, "cases": []},
             "integration": {"ok": False, "cases": []},
             "failure_handling": {"ok": False, "cases": []},
         }
+
+    client_fn = sse_client if transport == "sse" else streamablehttp_client
+
     try:
-        return anyio.run(run_mcp_stdio_probe_async, spec)
+        async with client_fn(
+            url=url,
+            headers=headers,
+            timeout=timeout_seconds,
+            sse_read_timeout=read_timeout,
+        ) as streams:
+            # streamablehttp returns 3-tuple (read, write, session_id_cb)
+            if transport == "streamable_http":
+                read_stream, write_stream, _ = streams
+            else:
+                read_stream, write_stream = streams
+
+            async with ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=timeout_seconds)) as session:
+                init = dump_model(await session.initialize())
+                init_ok = bool(init.get("serverInfo", {}).get("name")) and init.get("protocolVersion") is not None
+
+                tools_result = dump_model(await session.list_tools())
+                tools = tools_result.get("tools", [])
+                tool_names = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+                tools_ok = isinstance(tools, list) and len(tools) > 0 and all(name for name in tool_names)
+
+                safe_tool_spec = choose_safe_mcp_tool(spec, tools)
+                safe_result = None
+                if safe_tool_spec:
+                    safe_result = await invoke_mcp_tool(session, safe_tool_spec, timeout_seconds)
+
+                integration_result = None
+                if spec.get("integration_tool"):
+                    integration_result = await invoke_mcp_tool(session, spec["integration_tool"], timeout_seconds)
+
+                failure_result = None
+                if spec.get("failure_tool"):
+                    failure_result = await invoke_mcp_tool(session, spec["failure_tool"], timeout_seconds)
+
+                health_preview = json.dumps(
+                    {
+                        "server": init.get("serverInfo", {}).get("name"),
+                        "protocolVersion": init.get("protocolVersion"),
+                        "tools": tool_names,
+                    },
+                    ensure_ascii=False,
+                )[:400]
+
+                return {
+                    "ok": init_ok and tools_ok,
+                    "transport": transport,
+                    "url": url,
+                    "initialize": init,
+                    "tools_list": tools_result,
+                    "health": {
+                        "ok": init_ok and tools_ok,
+                        "server_name": init.get("serverInfo", {}).get("name"),
+                        "protocol_version": init.get("protocolVersion"),
+                        "tool_count": len(tool_names),
+                        "tool_names": tool_names,
+                        "body_preview": health_preview,
+                    },
+                    "smoke": {
+                        "ok": bool(safe_result and safe_result["ok"]),
+                        "cases": [mcp_case("safe_tool_call", bool(safe_result and safe_result["ok"]), safe_result or {"error": "No safe MCP tool available"})],
+                    },
+                    "integration": {
+                        "ok": bool(integration_result and integration_result["ok"]),
+                        "cases": [mcp_case("integration_tool_call", bool(integration_result and integration_result["ok"]), integration_result or {"error": "No integration MCP tool configured"})],
+                    },
+                    "failure_handling": {
+                        "ok": bool(failure_result and failure_result["ok"]),
+                        "cases": [mcp_case("failure_tool_call", bool(failure_result and failure_result["ok"]), failure_result or {"error": "No failure MCP tool configured"})],
+                    },
+                }
     except Exception as e:
+        # Unwrap anyio TaskGroup / ExceptionGroup for clearer diagnostics
         error = str(e)
+        if hasattr(e, "exceptions") and hasattr(e, "exceptions"):  # ExceptionGroup
+            sub = ", ".join(str(ex) for ex in e.exceptions[:3])
+            error = f"{error} — caused by: {sub}"
+        elif hasattr(e, "__context__") and e.__context__:
+            error = f"{error} — caused by: {e.__context__}"
         return {
             "ok": False,
+            "transport": transport,
+            "url": url,
             "error": error,
             "health": {"ok": False, "error": error, "body_preview": ""},
             "smoke": {"ok": False, "cases": [{"case": "safe_tool_call", "ok": False, "error": error, "body_preview": ""}]},
             "integration": {"ok": False, "cases": [{"case": "integration_tool_call", "ok": False, "error": error, "body_preview": ""}]},
             "failure_handling": {"ok": False, "cases": [{"case": "failure_tool_call", "ok": False, "error": error, "body_preview": ""}]},
+        }
+
+
+def run_mcp_probe(spec: dict[str, Any]) -> dict[str, Any]:
+    transport = spec.get("transport", "stdio")
+    if transport == "stdio":
+        try:
+            return anyio.run(run_mcp_stdio_probe_async, spec)
+        except Exception as e:
+            error = str(e)
+            return {
+                "ok": False,
+                "error": error,
+                "health": {"ok": False, "error": error, "body_preview": ""},
+                "smoke": {"ok": False, "cases": [{"case": "safe_tool_call", "ok": False, "error": error, "body_preview": ""}]},
+                "integration": {"ok": False, "cases": [{"case": "integration_tool_call", "ok": False, "error": error, "body_preview": ""}]},
+                "failure_handling": {"ok": False, "cases": [{"case": "failure_tool_call", "ok": False, "error": error, "body_preview": ""}]},
+            }
+    elif transport in ("sse", "streamable_http"):
+        try:
+            return anyio.run(run_mcp_http_probe_async, spec)
+        except Exception as e:
+            error = str(e)
+            return {
+                "ok": False,
+                "transport": transport,
+                "error": error,
+                "health": {"ok": False, "error": error, "body_preview": ""},
+                "smoke": {"ok": False, "cases": []},
+                "integration": {"ok": False, "cases": []},
+                "failure_handling": {"ok": False, "cases": []},
+            }
+    else:
+        return {
+            "ok": False,
+            "error": f"Unsupported MCP transport: {transport}",
+            "health": {"ok": False, "error": f"Unsupported MCP transport: {transport}", "body_preview": ""},
+            "smoke": {"ok": False, "cases": []},
+            "integration": {"ok": False, "cases": []},
+            "failure_handling": {"ok": False, "cases": []},
         }
 
 
