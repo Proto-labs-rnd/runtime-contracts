@@ -1,9 +1,16 @@
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
+*.bak
+*.log
 .env
 secrets/
 *.egg-info/
 dist/
 build/
 .venv/
+*.egg
+
+# Auto-added by workspace cleanup
+.pytest_cache/

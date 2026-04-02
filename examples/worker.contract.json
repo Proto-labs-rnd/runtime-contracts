@@ -1,0 +1,26 @@
+{
+  "name": "example-worker",
+  "contract_type": "worker",
+  "commands": {
+    "start": "python3 worker.py --queue tasks",
+    "stop": "kill $PID",
+    "health": "python3 check_worker.py",
+    "test": "python3 -m pytest tests/"
+  },
+  "artifacts": ["worker.py", "README.md"],
+  "deps": ["python3"],
+  "packaging": ["pyproject.toml"],
+  "logs": {
+    "path": "/tmp/example-worker.log",
+    "contains": ["started", "processed", "error"]
+  },
+  "guards": {
+    "transport": "stdio",
+    "note": "Worker reads from queue, no network exposure"
+  },
+  "verdict": {
+    "claim": "Example worker is ready",
+    "reason": "Artifacts, deps, logs, and guards are all verified",
+    "next": "Deploy to staging queue"
+  }
+}

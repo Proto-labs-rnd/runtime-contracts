@@ -1,0 +1,45 @@
+{
+  "name": "example-mcp-server",
+  "contract_type": "mcp_server",
+  "commands": {
+    "start": "python3 my_mcp_server.py",
+    "stop": "kill $PID",
+    "health": "echo 'MCP server health checked via handshake'",
+    "test": "python3 -m pytest tests/"
+  },
+  "artifacts": ["my_mcp_server.py", "README.md"],
+  "deps": ["python3"],
+  "packaging": ["pyproject.toml"],
+  "mcp": {
+    "transport": "stdio",
+    "command": "python3",
+    "args": ["my_mcp_server.py"],
+    "safe_tool": {
+      "name": "list_items",
+      "arguments": {}
+    },
+    "failure_tool": {
+      "name": "get_item",
+      "arguments": {"id": -1},
+      "expect_error": true
+    },
+    "integration_tool": {
+      "name": "search",
+      "arguments": {"query": "test"}
+    },
+    "timeout_seconds": 10
+  },
+  "logs": {
+    "path": "/tmp/example-mcp.log",
+    "contains": ["initialize", "tools/list"]
+  },
+  "guards": {
+    "transport": "stdio",
+    "note": "MCP server uses stdio transport, no port binding"
+  },
+  "verdict": {
+    "claim": "MCP server is ready for deployment",
+    "reason": "Handshake, safe call, failure path, and integration are all proven",
+    "next": "Add to Claude Code MCP config"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "example-http-api",
+  "contract_type": "http_api",
+  "commands": {
+    "start": "python3 app.py",
+    "stop": "kill $PID",
+    "health": "curl http://127.0.0.1:8080/health",
+    "smoke": "curl -X POST http://127.0.0.1:8080/search"
+  },
+  "artifacts": ["app.py", "README.md"],
+  "deps": ["python3"],
+  "packaging": ["pyproject.toml"],
+  "health": {
+    "url": "http://127.0.0.1:8080/health",
+    "expect_status": 200,
+    "contains": ["ok"]
+  },
+  "smoke": [
+    {
+      "name": "search-ok",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/search",
+      "json": {"query": "hello"},
+      "expect_status": 200
+    }
+  ],
+  "logs": {
+    "path": "/tmp/example-api.log",
+    "contains": ["request", "error"]
+  },
+  "guards": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "verdict": {
+    "claim": "Example HTTP API is ready",
+    "reason": "Health, smoke, logs, and loopback guard are all proven"
+  }
+}
